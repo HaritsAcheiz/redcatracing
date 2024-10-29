@@ -5,6 +5,11 @@ import os
 import asyncio
 import duckdb
 import json
+import logging
+import re
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -12,14 +17,20 @@ class RedCatScraper:
 	base_url: str = 'https://www.redcatracing.com/'
 	user_agent: str = 'Mozilla/5.0 (X11; Linux x86_64)'
 
+	def clean_html_with_regex(self, html_content):
+		cleaned_html = re.sub(r'\s*\n\s*', '', html_content)
+		cleaned_html = re.sub(r'>\s+<', '><', cleaned_html)
+
+		return cleaned_html
+
 	async def fetch(self, aclient, url, limit):
-		print(f'Fetching {url}...')
+		logger.info(f'Fetching {url}...')
 		async with limit:
 			response = await aclient.get(url)
 			if limit.locked():
 				await asyncio.sleep(1)
 				response.raise_for_status()
-		print(f'Fetching {url}...Completed!')
+		logger.info(f'Fetching {url}...Completed!')
 
 		return url, response.text
 
@@ -38,28 +49,27 @@ class RedCatScraper:
 		return htmls
 
 	def insert_to_db(self, htmls, database_name, table_name):
+		logger.info('Inserting data to database...')
 		if os.path.exists(database_name):
 			os.remove(database_name)
+
 		conn = duckdb.connect(database_name)
 		curr = conn.cursor()
-		curr.execute(
-			f"""
-			CREATE TABLE IF NOT EXISTS {table_name}(
-			url TEXT,
-			html BLOB
-			)
-			"""
-		)
 
-		for url, html in htmls:
-			html_blob = bytes(html, 'utf-8')
-			curr.execute(
-				f"INSERT INTO {table_name} (url, html) VALUES(?,?)",
-				(url, html_blob)
-			)
+		try:
+			curr.execute(f"CREATE TABLE IF NOT EXISTS {table_name} (url TEXT, html BLOB)")
+
+			htmls = [(url, bytes(html, 'utf-8') if not isinstance(html, bytes) else html) for url, html in htmls]
+			curr.executemany(f"INSERT INTO {table_name} (url, html) VALUES (?, ?)", htmls)
 			conn.commit()
 
+		finally:
+			curr.close()
+			conn.close()
+			logger.info('Data inserted!')
+
 	def get_data(self):
+		logger.info('Getting data from database...')
 		conn = duckdb.connect("redcat.db")
 		curr = conn.cursor()
 		curr.execute("SELECT url, html FROM  products_src")
@@ -69,11 +79,24 @@ class RedCatScraper:
 			with open('shopify_schema.json', 'r') as file:
 				current_product = json.load(file)
 			tree = HTMLParser(data[1])
-			product_elem = tree.css_first('div.card.card--collapsed.card--sticky')
-			current_product['Handle'] = data[0].split('/')[-1]
-			print(current_product)
+			# logger.info(data[1])
+			current_product['Handle'] = data[0].split('/')[-1].split('?')[0]
+			product_elem = tree.css_first('div#shopify-section-product')
+
+			title_elem = product_elem.css_first('h1')
+			if title_elem is not None:
+				current_product['Title'] = title_elem.text(strip=True)
+
+			desc_elem = tree.css_first('div.content-container')
+			desc_overview = self.clean_html_with_regex(desc_elem.css_first('div.tabs-content-container').html)
+			if desc_elem is not None:
+				current_product['Body (HTML)'] = desc_overview
+			product_datas.append(current_product)
+		logger.info(product_datas[-1])
+
+		logger.info('Data Extracted!')
 
 	def run(self, urls):
-		products_html = asyncio.run(self.fetch_all(urls))
-		self.insert_to_db(products_html, database_name='redcat.db', table_name='products_src')
+		# products_html = asyncio.run(self.fetch_all(urls))
+		# self.insert_to_db(products_html, database_name='redcat.db', table_name='products_src')
 		self.get_data()
