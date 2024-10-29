@@ -7,6 +7,7 @@ import duckdb
 import json
 import logging
 import re
+from html import escape
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -17,9 +18,24 @@ class RedCatScraper:
 	base_url: str = 'https://www.redcatracing.com/'
 	user_agent: str = 'Mozilla/5.0 (X11; Linux x86_64)'
 
-	def clean_html_with_regex(self, html_content):
-		cleaned_html = re.sub(r'\s*\n\s*', '', html_content)
+	def clean_html(self, html_content):
+		# 1. Remove non-standard attributes that Shopify may not recognize
+		cleaned_html = re.sub(r'\sdata-[\w-]+="[^"]*"', '', html_content)
+
+		# 2. Encode special characters like apostrophes, quotes, etc.
+		cleaned_html = escape(cleaned_html)
+
+		# 3. Decode standard HTML entities back to their original form (e.g., <, >)
+		cleaned_html = cleaned_html.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
+
+		# 4. Remove excessive whitespace between tags
 		cleaned_html = re.sub(r'>\s+<', '><', cleaned_html)
+
+		# 5. Ensure spaces between inline elements where necessary
+		cleaned_html = re.sub(r'(<span[^>]*>)\s*(<)', r'\1 <', cleaned_html)
+
+		# 6. Remove excess spaces and newlines in text nodes
+		cleaned_html = re.sub(r'\s*\n\s*', '', cleaned_html)
 
 		return cleaned_html
 
@@ -88,10 +104,18 @@ class RedCatScraper:
 				current_product['Title'] = title_elem.text(strip=True)
 
 			desc_elem = tree.css_first('div.content-container')
-			desc_overview = self.clean_html_with_regex(desc_elem.css_first('div.tabs-content-container').html)
+			desc_overview = self.clean_html(desc_elem.css_first('div.tabs-content-container').html)
 			if desc_elem is not None:
 				current_product['Body (HTML)'] = desc_overview
+
+			current_product['Vendor'] = 'Redcat'
+			breadcrumbs = product_elem.css_first('div.container').text(strip=True)
+			current_product['Product Category'] = breadcrumbs.replace('/', ' > ')
+
+			current_product['Type'] = ''
+
 			product_datas.append(current_product)
+
 		logger.info(product_datas[-1])
 
 		logger.info('Data Extracted!')
