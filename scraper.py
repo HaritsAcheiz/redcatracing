@@ -92,27 +92,39 @@ class RedCatScraper:
 		datas = curr.fetchall()
 		product_datas = list()
 		for data in datas:
+			tree = HTMLParser(data[1])
+			script_tags = tree.css_first('script#product-json')
+			product_data = json.loads(script_tags.text(strip=True))
+
 			with open('shopify_schema.json', 'r') as file:
 				current_product = json.load(file)
-			tree = HTMLParser(data[1])
-			# logger.info(data[1])
-			current_product['Handle'] = data[0].split('/')[-1].split('?')[0]
-			product_elem = tree.css_first('div#shopify-section-product')
 
-			title_elem = product_elem.css_first('h1')
-			if title_elem is not None:
-				current_product['Title'] = title_elem.text(strip=True)
+			current_product['Handle'] = product_data['id']
+			current_product['Title'] = product_data['title']
+
+			product_elem = tree.css_first('div#shopify-section-product')
 
 			desc_elem = tree.css_first('div.content-container')
 			desc_overview = self.clean_html(desc_elem.css_first('div.tabs-content-container').html)
 			if desc_elem is not None:
 				current_product['Body (HTML)'] = desc_overview
 
-			current_product['Vendor'] = 'Redcat'
-			breadcrumbs = product_elem.css_first('div.container').text(strip=True)
-			current_product['Product Category'] = breadcrumbs.replace('/', ' > ')
+			current_product['Vendor'] = 'RCR'
 
-			current_product['Type'] = ''
+			breadcrumbs = product_elem.css_first('div.container').text(strip=True).split('/')
+			current_product['Product Category'] = ' > '.join(breadcrumbs[1:-1])
+
+			current_product['Type'] = product_data['type']
+			current_product['Tags'] = ', '.join(product_data['tags'])
+
+			option_labels = product_elem.css('label.product-options-label')
+			for index, option_label in enumerate(option_labels, 1):
+				current_product[f'Option{index} Name'] = option_label.text(strip=True).split(':')[0]
+
+			option1_values = list()
+			for variant in product_data['variants']:
+				option1_values.append(variant['option1'])
+			current_product['Option1 Value'] = option1_values
 
 			product_datas.append(current_product)
 
