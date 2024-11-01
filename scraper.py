@@ -42,7 +42,7 @@ class RedCatScraper:
 	async def fetch(self, aclient, url, limit):
 		logger.info(f'Fetching {url}...')
 		async with limit:
-			response = await aclient.get(url)
+			response = await aclient.get(url, follow_redirects=True)
 			if limit.locked():
 				await asyncio.sleep(1)
 				response.raise_for_status()
@@ -121,10 +121,38 @@ class RedCatScraper:
 			for index, option_label in enumerate(option_labels, 1):
 				current_product[f'Option{index} Name'] = option_label.text(strip=True).split(':')[0]
 
-			option1_values = list()
+			variant_skus = list()
+			variant_weight = list()
+
 			for variant in product_data['variants']:
-				option1_values.append(variant['option1'])
+				if current_product['Option1 Name'] != '':
+					option1_values = list()
+					if variant['option1'] != 'None':
+						option1_values.append(variant['option1'])
+				else:
+					option1_values = ''
+
+				if current_product['Option2 Name'] != '':
+					option2_values = list()
+					if variant['option2'] != 'None':
+						option2_values.append(variant['option2'])
+				else:
+					option2_values = ''
+
+				if current_product['Option3 Name'] != '':
+					option3_values = list()
+					if variant['option3'] != 'None':
+						option3_values.append(variant['option3'])
+				else:
+					option3_values = ''
+
+				variant_skus.append(variant['sku'])
+				variant_weight.append(variant['weight'])
+
 			current_product['Option1 Value'] = option1_values
+			current_product['Option2 Value'] = option2_values
+			current_product['Option3 Value'] = option3_values
+			current_product['Variant SKU'] = variant_skus
 
 			product_datas.append(current_product)
 
