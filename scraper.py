@@ -8,6 +8,7 @@ import json
 import logging
 import re
 from html import escape
+import math
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -17,6 +18,15 @@ logger = logging.getLogger(__name__)
 class RedCatScraper:
 	base_url: str = 'https://www.redcatracing.com/'
 	user_agent: str = 'Mozilla/5.0 (X11; Linux x86_64)'
+
+	def get_price(self, wholesaleprice):
+		float_wholesaleprice = float(wholesaleprice)
+		if (wholesaleprice is None) or (float_wholesaleprice == 0) or (wholesaleprice == '0.00'):
+			result = "0.00"
+		else:
+			result = float_wholesaleprice - round(float_wholesaleprice * 5 / 100, 2)
+
+		return f"{result:.2f}"
 
 	def clean_html(self, html_content):
 		# 1. Remove non-standard attributes that Shopify may not recognize
@@ -121,38 +131,52 @@ class RedCatScraper:
 			for index, option_label in enumerate(option_labels, 1):
 				current_product[f'Option{index} Name'] = option_label.text(strip=True).split(':')[0]
 
+			option1_values = list()
+			option2_values = list()
+			option3_values = list()
 			variant_skus = list()
 			variant_weight = list()
+			variant_qty = list()
+			variant_cost = list()
+			variant_image = list()
 
 			for variant in product_data['variants']:
 				if current_product['Option1 Name'] != '':
-					option1_values = list()
 					if variant['option1'] != 'None':
 						option1_values.append(variant['option1'])
 				else:
 					option1_values = ''
 
 				if current_product['Option2 Name'] != '':
-					option2_values = list()
 					if variant['option2'] != 'None':
 						option2_values.append(variant['option2'])
 				else:
 					option2_values = ''
 
 				if current_product['Option3 Name'] != '':
-					option3_values = list()
 					if variant['option3'] != 'None':
 						option3_values.append(variant['option3'])
 				else:
 					option3_values = ''
 
 				variant_skus.append(variant['sku'])
-				variant_weight.append(variant['weight'])
+				variant_weight.append(round(variant['weight'] / 100, 2))
+				variant_qty.append(10 if variant['available'] else 0)
+				variant_cost.append(round(variant['price'] / 100, 2))
+				variant_image.append(variant['featured_image']['src'][2:])
+
 
 			current_product['Option1 Value'] = option1_values
 			current_product['Option2 Value'] = option2_values
 			current_product['Option3 Value'] = option3_values
 			current_product['Variant SKU'] = variant_skus
+			current_product['Variant Grams'] = variant_weight
+			current_product['Variant Inventory Qty'] = variant_qty
+			current_product['Google Shopping / Custom Label 0'] = 'RCR'
+			current_product['Variant Image'] = variant_image
+			current_product['Cost per item'] = variant_cost
+			current_product['Variant Price'] = [self.get_price(x) for x in variant_cost]
+			current_product['Variant Compare At Price'] = ''
 
 			product_datas.append(current_product)
 
